@@ -310,6 +310,7 @@ def run_whatshap(
     default_gq: int = 30,
     write_command_line_header: bool = True,
     use_ped_samples: bool = False,
+    use_supplementary: bool = False,
     algorithm: str = "whatshap",
 ) -> None:
     """
@@ -346,7 +347,7 @@ def run_whatshap(
         raise CommandLineError("The hapchat algorithm cannot do pedigree phasing")
     if samples is None:
         samples = []
-
+    logger.info(f"use_supplementary is {use_supplementary}")
     timers = StageTimer()
     logger.info(f"This is WhatsHap {__version__} running under Python {platform.python_version()}")
     numeric_sample_ids = NumericSampleIds()
@@ -377,6 +378,7 @@ def run_whatshap(
                 ignore_read_groups,
                 mapq_threshold=mapping_quality,
                 only_snvs=only_snvs,
+                use_supplementary=use_supplementary
             )
         )
         show_phase_vcfs = phased_input_reader.has_vcfs
@@ -1138,6 +1140,8 @@ def add_arguments(parser):
     arg("--use-ped-samples", dest="use_ped_samples",
         action="store_true", default=False,
         help="Only work on samples mentioned in the provided PED file.")
+    arg("--use-supplementary", dest="use_supplementary", action="store_true", default=False,
+        help="Include supplementary alignments into reads")
 # fmt: on
 
 

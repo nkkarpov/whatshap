@@ -15,7 +15,6 @@ from .bam import SampleBamReader, MultiBamReader, BamReader
 from .align import edit_distance, edit_distance_affine_gap, kmer_align, enumerate_all_kmers
 from ._variants import _iterate_cigar, _detect_alleles
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -66,6 +65,17 @@ class VariantProgress:
         return [i for i, a in enumerate(self.alleles) if 0 <= a.progress < a.length]
 
 
+class ReadWithInfo:
+    def __init__(self, read, is_supplementary, is_reverse, reference_start, reference_end):
+        self.read = read
+        self.is_supplementary = is_supplementary
+        self.is_reverse = is_reverse
+        self.reference_start = reference_start
+        self.reference_end = reference_end
+    def __repr__(self):
+        return f"ReadWithInfo({repr(self.read)}, is_supplementary={self.is_supplementary}, is_reverse={self.is_reverse}, reference_start={self.reference_start}, reference_end={self.reference_end})"
+
+
 class ReadSetReader:
     """
     Associate VCF variants with BAM reads.
@@ -94,6 +104,7 @@ class ReadSetReader:
         kmer_size: int = 7,
         kmerald_gappenalty: float = 40,
         kmerald_window: int = 25,
+        use_supplementary: bool = False,
     ):
         """
         paths -- list of BAM paths
@@ -120,6 +131,8 @@ class ReadSetReader:
         self._kmerald_window = kmerald_window
         self._paths = paths
         self._reader: BamReader
+        self._use_supplementary = use_supplementary
+        logger.info(f'Reader initialized with use_supplementary={use_supplementary}')
         if len(paths) == 1:
             self._reader = SampleBamReader(paths[0], reference=reference)
         else:
@@ -155,6 +168,7 @@ class ReadSetReader:
             assert count == 1, f"Position {pos} occurs more than once in variant list."
 
         alignments = self._usable_alignments(chromosome, sample, regions)
+        # logger.info(f"Number of all alignments: {len(alignments)}")
         reads = self._alignments_to_reads(alignments, variants, sample, reference)
         grouped_reads = self._group_paired_reads(reads)
         readset = self._make_readset_from_grouped_reads(grouped_reads)
@@ -168,7 +182,7 @@ class ReadSetReader:
         return read_set
 
     @staticmethod
-    def _group_paired_reads(reads: Iterable[Read]) -> Iterator[List[Read]]:
+    def _group_paired_reads(reads: Iterable[ReadWithInfo]) -> Iterator[List[Read]]:
         """
         Group reads into paired-end read pairs. Uses name, source_id and sample_id
         as grouping key.
@@ -179,13 +193,18 @@ class ReadSetReader:
         """
         groups = defaultdict(list)
         for read in reads:
-            groups[(read.source_id, read.name, read.sample_id)].append(read)
+            groups[(read.read.source_id, read.read.name, read.read.sample_id)].append(read)
         for group in groups.values():
             if len(group) > 2:
-                raise ReadSetError(
-                    f"Read name {group[0].name!r} occurs more than twice in the input file"
-                )
-            yield group
+                logger.info(f"Group has {len(group)} items.")
+                logger.info(f"{group}")
+                # raise ReadSetError(
+                #     f"Read name {group[0].name!r} occurs more than twice in the input file"
+                # )
+            for read in group:
+                if not read.is_supplementary:
+                    yield [read.read]
+            # yield group
 
     def _usable_alignments(self, chromosome, sample, regions=None):
         """
@@ -201,7 +220,7 @@ class ReadSetReader:
                 # TODO handle additional alignments correctly!
                 # find out why they are sometimes overlapping/redundant
                 if (
-                    alignment.bam_alignment.flag & 2048 != 0
+                    (not self._use_supplementary and alignment.bam_alignment.is_supplementary)
                     or alignment.bam_alignment.mapping_quality < self._mapq_threshold
                     or alignment.bam_alignment.is_secondary
                     or alignment.bam_alignment.is_unmapped
@@ -221,7 +240,10 @@ class ReadSetReader:
 
         Yield Read objects.
         """
+        logger.info("Starting alignments to reads")
         # FIXME hard-coded zero
+        number_of_alignments = 0
+        number_of_supplementary_alignments = 0
         numeric_sample_id = 0 if sample is None else self._numeric_sample_ids[sample]
         if reference is not None:
             # Copy the pyfaidx.FastaRecord into a str for faster access
@@ -256,6 +278,8 @@ class ReadSetReader:
             splitted_strings = None
 
         for alignment in alignments:
+            # if alignment.bam_alignment.is_supplementary:
+            #     logger.info(f"Alignment {alignment.bam_alignment.reference_id}")
             try:
                 barcode = alignment.bam_alignment.get_tag("BX")
             except KeyError:
@@ -309,7 +333,17 @@ class ReadSetReader:
             for j, allele, quality in detected:
                 read.add_variant(variants[j].position, allele, quality)
             if read:  # At least one variant covered and detected
-                yield read
+                number_of_alignments += 1
+                number_of_supplementary_alignments += alignment.bam_alignment.is_supplementary
+                yield ReadWithInfo(read,
+                                   alignment.bam_alignment.is_supplementary,
+                                   alignment.bam_alignment.is_reverse,
+                                   alignment.bam_alignment.reference_start,
+                                   alignment.bam_alignment.reference_end
+                                   )
+
+        logger.info(f'Number of supplementary alignments: {number_of_supplementary_alignments}')
+
 
     def detect_non_overlapping_variants(self, variants: List[VcfVariant]):
         """
@@ -387,9 +421,9 @@ class ReadSetReader:
         else:
             left = cigar[:i]
         if consumed < middle_length:
-            right = [(middle_op, middle_length - consumed)] + cigar[i + 1 :]
+            right = [(middle_op, middle_length - consumed)] + cigar[i + 1:]
         else:
-            right = cigar[i + 1 :]
+            right = cigar[i + 1:]
         return left, right
 
     @staticmethod
@@ -489,8 +523,8 @@ class ReadSetReader:
             assert variant.position - left_ref_bases >= 0
             assert variant.position + right_ref_bases <= len(reference)
             query_temp = bam_read.query_sequence[
-                query_pos - left_query_bases : query_pos + right_query_bases
-            ]
+                         query_pos - left_query_bases: query_pos + right_query_bases
+                         ]
             if query_temp in splitted_strings:
                 query = splitted_strings[query_temp]
             else:
@@ -498,8 +532,8 @@ class ReadSetReader:
                 splitted_strings[query_temp] = query
 
             ref_temp = reference[
-                variant.position - left_ref_bases : variant.position + right_ref_bases
-            ]
+                       variant.position - left_ref_bases: variant.position + right_ref_bases
+                       ]
             if ref_temp in splitted_strings:
                 ref = splitted_strings[ref_temp]
             else:
@@ -507,13 +541,13 @@ class ReadSetReader:
                 splitted_strings[ref_temp] = ref
 
             alt_temp = (
-                reference[variant.position - left_ref_bases : variant.position]
+                reference[variant.position - left_ref_bases: variant.position]
                 + variant.alternative_allele
                 + reference[
-                    variant.position
-                    + len(variant.reference_allele) : variant.position
-                    + right_ref_bases
-                ]
+                  variant.position
+                  + len(variant.reference_allele): variant.position
+                                                   + right_ref_bases
+                  ]
             )
 
             if alt_temp in splitted_strings:
@@ -555,12 +589,12 @@ class ReadSetReader:
             assert variant.position + right_ref_bases <= len(reference)
 
             query = bam_read.query_sequence[
-                query_pos - left_query_bases : query_pos + right_query_bases
-            ]
+                    query_pos - left_query_bases: query_pos + right_query_bases
+                    ]
             pos = variant.position
-            left_pad = reference[pos - left_ref_bases : pos]
-            right_pad = reference[pos + len(variant.reference_allele) : pos + right_ref_bases]
-            padded_alleles = [reference[pos - left_ref_bases : pos + right_ref_bases]]
+            left_pad = reference[pos - left_ref_bases: pos]
+            right_pad = reference[pos + len(variant.reference_allele): pos + right_ref_bases]
+            padded_alleles = [reference[pos - left_ref_bases: pos + right_ref_bases]]
             for alt in variant.get_alt_allele_list():
                 padded_alleles.append(left_pad + alt + right_pad)
 
