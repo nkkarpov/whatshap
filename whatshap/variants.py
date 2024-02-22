@@ -72,8 +72,17 @@ class ReadWithInfo:
         self.is_reverse = is_reverse
         self.reference_start = reference_start
         self.reference_end = reference_end
+
     def __repr__(self):
         return f"ReadWithInfo({repr(self.read)}, is_supplementary={self.is_supplementary}, is_reverse={self.is_reverse}, reference_start={self.reference_start}, reference_end={self.reference_end})"
+
+    def is_intersected(self, b) -> bool:
+        return b.reference_end >= self.reference_start and b.reference_start <= self.reference_end
+
+    def distance(self, b):
+        if self.is_intersected(b):
+            return 0
+        return min(abs(b.reference_end - self.reference_start), abs(b.reference_start - self.reference_end))
 
 
 class ReadSetReader:
@@ -105,6 +114,7 @@ class ReadSetReader:
         kmerald_gappenalty: float = 40,
         kmerald_window: int = 25,
         use_supplementary: bool = False,
+        supplementary_distance_threshold: int = 100000,
     ):
         """
         paths -- list of BAM paths
@@ -132,7 +142,7 @@ class ReadSetReader:
         self._paths = paths
         self._reader: BamReader
         self._use_supplementary = use_supplementary
-        logger.info(f'Reader initialized with use_supplementary={use_supplementary}')
+        self._supplementary_distance_threshold = supplementary_distance_threshold
         if len(paths) == 1:
             self._reader = SampleBamReader(paths[0], reference=reference)
         else:
@@ -170,7 +180,7 @@ class ReadSetReader:
         alignments = self._usable_alignments(chromosome, sample, regions)
         # logger.info(f"Number of all alignments: {len(alignments)}")
         reads = self._alignments_to_reads(alignments, variants, sample, reference)
-        grouped_reads = self._group_paired_reads(reads)
+        grouped_reads = self._group_paired_reads(reads, self._supplementary_distance_threshold)
         readset = self._make_readset_from_grouped_reads(grouped_reads)
         return readset
 
@@ -182,7 +192,7 @@ class ReadSetReader:
         return read_set
 
     @staticmethod
-    def _group_paired_reads(reads: Iterable[ReadWithInfo]) -> Iterator[List[Read]]:
+    def _group_paired_reads(reads: Iterable[ReadWithInfo], distance_threshold) -> Iterator[List[Read]]:
         """
         Group reads into paired-end read pairs. Uses name, source_id and sample_id
         as grouping key.
@@ -194,17 +204,66 @@ class ReadSetReader:
         groups = defaultdict(list)
         for read in reads:
             groups[(read.read.source_id, read.read.name, read.read.sample_id)].append(read)
+        n_skipped = 0
+        n_non_singleton = 0
         for group in groups.values():
             if len(group) > 2:
-                logger.info(f"Group has {len(group)} items.")
-                logger.info(f"{group}")
-                # raise ReadSetError(
-                #     f"Read name {group[0].name!r} occurs more than twice in the input file"
-                # )
-            for read in group:
-                if not read.is_supplementary:
-                    yield [read.read]
-            # yield group
+                n_non_singleton += 1
+                # logger.info(f"Group of read {group[0].read.name!r} has {len(group)} items.")
+                primary = None
+                for read in group:
+                    if not read.is_supplementary:
+                        if primary is not None:
+                            raise ReadSetError(
+                                f"Read name {group[0].read.name!r} has more than two primary alignments.")
+                        primary = read
+                if primary is None:
+                    n_skipped += 1
+                    continue
+                reference_start = primary.reference_start
+                variants = dict()
+                primary_positions = set([variant.position for variant in primary.read])
+                skip = set()
+                for read in group:
+                    if not read.is_supplementary:
+                        continue
+                    if read.is_reverse != primary.is_reverse:
+                        continue
+                    if primary.distance(read) > distance_threshold:
+                        continue
+                    reference_start = min(reference_start, read.reference_start)
+                    for variant in read.read:
+                        if variant.position in primary_positions:
+                            continue
+                        if variant.position in variants.keys():
+                            if variants[variant.position].allele != variant.allele:
+                                skip.add(variant.position)
+                        else:
+                            variants[variant.position] = variant
+                super_read = Read(primary.read.name,
+                                  primary.read.mapqs[0],
+                                  primary.read.source_id,
+                                  primary.read.sample_id,
+                                  reference_start,
+                                  primary.read.BX_tag, )
+                for variant in primary.read:
+                    super_read.add_variant(variant.position, variant.allele, variant.quality)
+                for k, v in variants.items():
+                    if k not in skip:
+                        super_read.add_variant(v.position, v.allele, v.quality)
+                super_read.sort()
+                if len(super_read) != len(primary.read):
+                    logger.info(
+                        f"converted read {primary.read.name} of length {len(primary.read)} to read with length {len(super_read)}"
+                        " by using supplementary alignments.")
+                yield [super_read]
+            else:
+                if not group[0].is_supplementary:
+                    yield [group[0].read]
+                else:
+                    n_skipped += 1
+        logger.info(f"Number of non singleton groups: {n_non_singleton}")
+        logger.info(f"Skipped {n_skipped} groups")
 
     def _usable_alignments(self, chromosome, sample, regions=None):
         """
@@ -343,7 +402,6 @@ class ReadSetReader:
                                    )
 
         logger.info(f'Number of supplementary alignments: {number_of_supplementary_alignments}')
-
 
     def detect_non_overlapping_variants(self, variants: List[VcfVariant]):
         """
