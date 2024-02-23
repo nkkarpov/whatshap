@@ -254,8 +254,8 @@ class ReadSetReader:
                 super_read.sort()
                 if len(super_read) != len(primary.read):
                     logger.info(
-                        f"converted read {primary.read.name} of length {len(primary.read)} to read with length {len(super_read)}"
-                        " by using supplementary alignments.")
+                        f"Converted read {primary.read.name} with {len(primary.read)} variants"
+                        " to read with {len(super_read)} variants.")
                 yield [super_read]
             else:
                 if not group[0].is_supplementary:
