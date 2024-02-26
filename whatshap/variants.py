@@ -209,21 +209,23 @@ class ReadSetReader:
         for group in groups.values():
             if len(group) > 2:
                 n_non_singleton += 1
-                # logger.info(f"Group of read {group[0].read.name!r} has {len(group)} items.")
-                primary = None
+                logger.info(f"Group of read {group[0].read.name!r} has {len(group)} items.")
+                primary: Optional[ReadWithInfo] = None
                 for read in group:
                     if not read.is_supplementary:
                         if primary is not None:
                             raise ReadSetError(
-                                f"Read name {group[0].read.name!r} has more than two primary alignments.")
+                                f"Read name {group[0].name!r} has more than two primary alignments.")
                         primary = read
                 if primary is None:
                     n_skipped += 1
                     continue
                 reference_start = primary.reference_start
+                start = reference_start
                 variants = dict()
                 primary_positions = set([variant.position for variant in primary.read])
                 skip = set()
+                # logger.info(f'primary: {[(variant.position - start, variant.allele) for variant in primary.read]}')
                 for read in group:
                     if not read.is_supplementary:
                         continue
@@ -232,6 +234,7 @@ class ReadSetReader:
                     if primary.distance(read) > distance_threshold:
                         continue
                     reference_start = min(reference_start, read.reference_start)
+                    # logger.info(f"supp {[(variant.position - start, variant.allele) for variant in read.read]}")
                     for variant in read.read:
                         if variant.position in primary_positions:
                             continue
@@ -255,7 +258,7 @@ class ReadSetReader:
                 if len(super_read) != len(primary.read):
                     logger.info(
                         f"Converted read {primary.read.name} with {len(primary.read)} variants"
-                        " to read with {len(super_read)} variants.")
+                        f" to read with {len(super_read)} variants.")
                 yield [super_read]
             else:
                 if not group[0].is_supplementary:
