@@ -223,43 +223,37 @@ class ReadSetReader:
                 reference_start = primary.reference_start
                 start = reference_start
                 variants = dict()
-                primary_positions = set([variant.position for variant in primary.read])
                 skip = set()
-                # logger.info(f'primary: {[(variant.position - start, variant.allele) for variant in primary.read]}')
+                logger.info(f'primary: {[(variant.position - start, variant.allele) for variant in primary.read]}')
                 for read in group:
-                    if not read.is_supplementary:
-                        continue
                     if read.is_reverse != primary.is_reverse:
                         continue
                     if primary.distance(read) > distance_threshold:
                         continue
                     reference_start = min(reference_start, read.reference_start)
-                    # logger.info(f"supp {[(variant.position - start, variant.allele) for variant in read.read]}")
+                    logger.info(f"supp {[(variant.position - start, variant.allele) for variant in read.read]}")
                     for variant in read.read:
-                        if variant.position in primary_positions:
-                            continue
                         if variant.position in variants.keys():
                             if variants[variant.position].allele != variant.allele:
                                 skip.add(variant.position)
                         else:
                             variants[variant.position] = variant
-                super_read = Read(primary.read.name,
+                union_read = Read(primary.read.name,
                                   primary.read.mapqs[0],
                                   primary.read.source_id,
                                   primary.read.sample_id,
                                   reference_start,
                                   primary.read.BX_tag, )
-                for variant in primary.read:
-                    super_read.add_variant(variant.position, variant.allele, variant.quality)
                 for k, v in variants.items():
                     if k not in skip:
-                        super_read.add_variant(v.position, v.allele, v.quality)
-                super_read.sort()
-                if len(super_read) != len(primary.read):
+                        union_read.add_variant(v.position, v.allele, v.quality)
+                union_read.sort()
+                if len(union_read) != len(primary.read):
                     logger.info(
                         f"Converted read {primary.read.name} with {len(primary.read)} variants"
-                        f" to read with {len(super_read)} variants.")
-                yield [super_read]
+                        f" to read with {len(union_read)} variants.")
+                logger.info(f"union {[(variant.position - start, variant.allele) for variant in union_read]}")
+                yield [union_read]
             else:
                 if not group[0].is_supplementary:
                     yield [group[0].read]
