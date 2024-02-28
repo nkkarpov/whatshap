@@ -178,7 +178,6 @@ class ReadSetReader:
             assert count == 1, f"Position {pos} occurs more than once in variant list."
 
         alignments = self._usable_alignments(chromosome, sample, regions)
-        # logger.info(f"Number of all alignments: {len(alignments)}")
         reads = self._alignments_to_reads(alignments, variants, sample, reference)
         grouped_reads = self._group_paired_reads(reads, self._supplementary_distance_threshold)
         readset = self._make_readset_from_grouped_reads(grouped_reads)
@@ -224,14 +223,12 @@ class ReadSetReader:
                 start = reference_start
                 variants = dict()
                 skip = set()
-                logger.info(f'primary: {[(variant.position - start, variant.allele) for variant in primary.read]}')
                 for read in group:
                     if read.is_reverse != primary.is_reverse:
                         continue
                     if primary.distance(read) > distance_threshold:
                         continue
                     reference_start = min(reference_start, read.reference_start)
-                    logger.info(f"supp {[(variant.position - start, variant.allele) for variant in read.read]}")
                     for variant in read.read:
                         if variant.position in variants.keys():
                             if variants[variant.position].allele != variant.allele:
@@ -252,7 +249,6 @@ class ReadSetReader:
                     logger.info(
                         f"Converted read {primary.read.name} with {len(primary.read)} variants"
                         f" to read with {len(union_read)} variants.")
-                logger.info(f"union {[(variant.position - start, variant.allele) for variant in union_read]}")
                 yield [union_read]
             else:
                 if not group[0].is_supplementary:
@@ -334,8 +330,6 @@ class ReadSetReader:
             splitted_strings = None
 
         for alignment in alignments:
-            # if alignment.bam_alignment.is_supplementary:
-            #     logger.info(f"Alignment {alignment.bam_alignment.reference_id}")
             try:
                 barcode = alignment.bam_alignment.get_tag("BX")
             except KeyError:

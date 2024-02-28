@@ -330,6 +330,9 @@ def run_whatshap(
     read_merging_max_error_rate -- max error rate on edge of merge graph considered
     read_merging_positive_threshold -- threshold on the ratio of the two probabilities
     read_merging_negative_threshold -- threshold on the opposite ratio of positive threshold
+    use_supplementary -- use supplementary alignments with primary
+    supplementary_distance_threshold -- distance threshold for filtering supplementary alignments
+
     max_coverage
     distrust_genotypes
     include_homozygous
@@ -348,7 +351,6 @@ def run_whatshap(
         raise CommandLineError("The hapchat algorithm cannot do pedigree phasing")
     if samples is None:
         samples = []
-    logger.info(f"use_supplementary is {use_supplementary}")
     timers = StageTimer()
     logger.info(f"This is WhatsHap {__version__} running under Python {platform.python_version()}")
     numeric_sample_ids = NumericSampleIds()
