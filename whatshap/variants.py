@@ -220,7 +220,6 @@ class ReadSetReader:
                     n_skipped += 1
                     continue
                 reference_start = primary.reference_start
-                start = reference_start
                 variants = dict()
                 skip = set()
                 for read in group:
