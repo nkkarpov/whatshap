@@ -195,9 +195,7 @@ class ReadSetReader:
         return read_set
 
     @staticmethod
-    def _group_reads(
-        reads: Iterable[AlignedRead], distance_threshold: int
-    ) -> Iterator[List[Read]]:
+    def _group_reads(reads: Iterable[AlignedRead], distance_threshold: int) -> Iterator[List[Read]]:
         """
         Group reads into paired-end read pairs. Uses name, source_id and sample_id
         as grouping key.
@@ -435,9 +433,9 @@ class ReadSetReader:
         else:
             left = cigar[:i]
         if consumed < middle_length:
-            right = [(middle_op, middle_length - consumed)] + cigar[i + 1:]
+            right = [(middle_op, middle_length - consumed)] + cigar[i + 1 :]
         else:
-            right = cigar[i + 1:]
+            right = cigar[i + 1 :]
         return left, right
 
     @staticmethod
@@ -537,8 +535,8 @@ class ReadSetReader:
             assert variant.position - left_ref_bases >= 0
             assert variant.position + right_ref_bases <= len(reference)
             query_temp = bam_read.query_sequence[
-                         query_pos - left_query_bases: query_pos + right_query_bases
-                         ]
+                query_pos - left_query_bases : query_pos + right_query_bases
+            ]
             if query_temp in splitted_strings:
                 query = splitted_strings[query_temp]
             else:
@@ -546,8 +544,8 @@ class ReadSetReader:
                 splitted_strings[query_temp] = query
 
             ref_temp = reference[
-                       variant.position - left_ref_bases: variant.position + right_ref_bases
-                       ]
+                variant.position - left_ref_bases : variant.position + right_ref_bases
+            ]
             if ref_temp in splitted_strings:
                 ref = splitted_strings[ref_temp]
             else:
@@ -555,13 +553,13 @@ class ReadSetReader:
                 splitted_strings[ref_temp] = ref
 
             alt_temp = (
-                reference[variant.position - left_ref_bases: variant.position]
+                reference[variant.position - left_ref_bases : variant.position]
                 + variant.alternative_allele
                 + reference[
-                  variant.position
-                  + len(variant.reference_allele): variant.position
-                                                   + right_ref_bases
-                  ]
+                    variant.position
+                    + len(variant.reference_allele) : variant.position
+                    + right_ref_bases
+                ]
             )
 
             if alt_temp in splitted_strings:
@@ -603,12 +601,12 @@ class ReadSetReader:
             assert variant.position + right_ref_bases <= len(reference)
 
             query = bam_read.query_sequence[
-                    query_pos - left_query_bases: query_pos + right_query_bases
-                    ]
+                query_pos - left_query_bases : query_pos + right_query_bases
+            ]
             pos = variant.position
-            left_pad = reference[pos - left_ref_bases: pos]
-            right_pad = reference[pos + len(variant.reference_allele): pos + right_ref_bases]
-            padded_alleles = [reference[pos - left_ref_bases: pos + right_ref_bases]]
+            left_pad = reference[pos - left_ref_bases : pos]
+            right_pad = reference[pos + len(variant.reference_allele) : pos + right_ref_bases]
+            padded_alleles = [reference[pos - left_ref_bases : pos + right_ref_bases]]
             for alt in variant.get_alt_allele_list():
                 padded_alleles.append(left_pad + alt + right_pad)
 
