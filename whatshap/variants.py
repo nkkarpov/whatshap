@@ -257,11 +257,10 @@ class ReadSetReader:
 
         Yield Read objects.
         """
-        logger.info("Starting alignments to reads")
         # FIXME hard-coded zero
+        numeric_sample_id = 0 if sample is None else self._numeric_sample_ids[sample]
         number_of_alignments = 0
         number_of_supplementary_alignments = 0
-        numeric_sample_id = 0 if sample is None else self._numeric_sample_ids[sample]
         if reference is not None:
             # Copy the pyfaidx.FastaRecord into a str for faster access
             reference = reference[:]
@@ -803,6 +802,16 @@ def merge_reads(*reads: Read) -> Read:
 
 
 def create_read_from_group(group: List[AlignedRead], distance_threshold: int) -> Optional[Read]:
+    """
+    Convert group of AlignedReads into a Read.
+
+    Pick supplementary reads that have the same orientation with the primary and with
+    the distance at most distance_threshold from primary, find the set of variants are fully agreed
+    and return these variants as a read.
+
+    If the group does not contain primary reads, then return None.
+    If the group contains more than two primary alignments return None and report warning.
+    """
     logger.debug(f"Group of read {group[0].read.name!r} has {len(group)} items.")
     primary: Optional[AlignedRead] = None
     for read in group:
