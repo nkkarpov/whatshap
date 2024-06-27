@@ -216,28 +216,39 @@ def consensus(
     components = dict()
 
     for pos, vote in votes.items():
-        best_allele, phase_set, fraction, score = best_candidate(vote)
-        components[pos] = phase_set
-        if phased[pos] is None:
-            if 100 * fraction < gap_threshold:
-                continue
-            if only_indels and change[pos].is_snv():
-                continue
-            if cut_homopolymers > 0:
-                max_length = max(
-                    length_of_homopolymer(refseq, pos + 1, 1, cut_homopolymers),
-                    length_of_homopolymer(refseq, pos, -1, cut_homopolymers),
-                )
-                if max_length > cut_homopolymers:
+        alleles = dict()
+        scores = dict()
+        phase_sets = dict()
+        for ht in range(2):
+            best_allele, phase_set, fraction, score = best_candidate(vote, ht)
+            phase_sets[ht] = phase_set
+            if phased[pos] is None:
+                if 100 * fraction < gap_threshold:
                     continue
-        super_reads[0].append(Variant(pos, allele=id2al[pos][best_allele], quality=score))
-        super_reads[1].append(Variant(pos, allele=id2al[pos][1 - best_allele], quality=score))
+                if only_indels and change[pos].is_snv():
+                    continue
+                if cut_homopolymers > 0:
+                    max_length = max(
+                        length_of_homopolymer(refseq, pos + 1, 1, cut_homopolymers),
+                        length_of_homopolymer(refseq, pos, -1, cut_homopolymers),
+                    )
+                    if max_length > cut_homopolymers:
+                        continue
+            alleles[ht] = id2al[pos][best_allele]
+            scores[ht] = score
+        if len(alleles) == 2:
+            if phase_sets[0] != phase_sets[1]:
+                continue
+            components[pos] = phase_sets[0]
+            for ht in range(2):
+                super_reads[ht].append(Variant(pos, allele=alleles[ht], quality=scores[ht]))
+
     for read in super_reads:
         read.sort(key=lambda x: x.position)
     return super_reads, components
 
 
-def best_candidate(var: Dict[Tuple[int, int], int]) -> Tuple[int, int, float, int]:
+def best_candidate(var: Dict[Tuple[int, int], int], ht: int) -> Tuple[int, int, float, int]:
     """
     Compute the proportion of the best candidate's score relative to the total score of all candidates
     and return this score with a candidate.
@@ -245,6 +256,7 @@ def best_candidate(var: Dict[Tuple[int, int], int]) -> Tuple[int, int, float, in
     Args:
         var: A dictionary of candidate components, where keys are tuples containing a component identifier
             and an additional identifier, and values are the scores.
+        ht: id of the haplotype to be considered.
 
     Returns:
         Tuple containing four elements:
@@ -270,11 +282,11 @@ def best_candidate(var: Dict[Tuple[int, int], int]) -> Tuple[int, int, float, in
         >>> best_candidate({(1, 1): 10, (2, 2): 20, (3, 3): 30, (4, 4): 40})
         (4, 4, 0.4, 40)
     """
-    lst = list(var.items())
+    lst = list(filter(lambda x: x[0][1] == ht, var.items()))
     lst.sort(key=lambda x: x[-1], reverse=True)
-    (phase_set, allele), score = lst[0]
+    (phase_set, _, allele), score = lst[0]
     total = sum(e[-1] for e in lst)
-    q = score / total
+    q = score / total if total > 0 else 0.0
     return allele, phase_set, q, score
 
 
@@ -339,7 +351,7 @@ def compute_votes(
 
     Returns:
         A dictionary where keys are variant positions and
-        values are dictionaries. Each inner dictionary maps a tuple of (phasing set index, haplotype) to
+        values are dictionaries. Each inner dictionary maps a tuple of (phasing set index, haplotype, allele) to
         the total quality score accumulated for that variant.
     """
     votes = dict()
@@ -356,11 +368,12 @@ def compute_votes(
                 continue
             if variant.position not in votes:
                 votes[variant.position] = dict()
-            if (ps, 0) not in votes[variant.position]:
-                votes[variant.position][(ps, 0)] = 0
-                votes[variant.position][(ps, 1)] = 0
+            if (ps, 0, 0) not in votes[variant.position]:
+                for k in range(2):
+                    votes[variant.position][(ps, 0, k)] = 0
+                    votes[variant.position][(ps, 1, k)] = 0
             votes[variant.position][
-                (ps, ht ^ al2id[variant.position][variant.allele])
+                (ps, ht, al2id[variant.position][variant.allele])
             ] += variant.quality
     if number_of_skipped > 0:
         logger.warning(
